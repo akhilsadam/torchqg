@@ -128,12 +128,20 @@ def workflow(
     if dump:
       hf = h5py.File(os.path.join(dir, name + '_dump.h5'), 'w')
       hf.create_dataset('time', data=time.detach().numpy())
+      # Store DNS data for initializing val model
+      hf.create_dataset('dns_r', data=dns[:, 0].detach().numpy())
+      hf.create_dataset('dns_q', data=dns[:, 1].detach().numpy())
+      hf.create_dataset('dns_p', data=dns[:, 2].detach().numpy())
+      hf.create_dataset('dns_u', data=dns[:, 3].detach().numpy())
+      hf.create_dataset('dns_v', data=dns[:, 4].detach().numpy())
+      # Store filtered DNS
       hf.create_dataset(system.name + '_r', data=fdns[:, 0].detach().numpy())
       hf.create_dataset(system.name + '_q', data=fdns[:, 1].detach().numpy())
       hf.create_dataset(system.name + '_p', data=fdns[:, 2].detach().numpy())
       hf.create_dataset(system.name + '_u', data=fdns[:, 3].detach().numpy())
       hf.create_dataset(system.name + '_v', data=fdns[:, 4].detach().numpy())
       for m in models:
+        # Store LES models
         hf.create_dataset(m.name + '_r', data=les[m.name][:, 0].detach().numpy())
         hf.create_dataset(m.name + '_q', data=les[m.name][:, 1].detach().numpy())
         hf.create_dataset(m.name + '_p', data=les[m.name][:, 2].detach().numpy())
