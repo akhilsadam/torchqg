@@ -73,16 +73,16 @@ h = QgModel(
 )
 
 # Initial conditions.
-init_data_path = 'output/geo_100_dump' # None
+init_data_path = 'output/spinup_10000_dump' # None
+iters = 100
+data_store_name = 'warmed_'+str(iters) # geo_'+str(iters) # 'warmed_100'
 if init_data_path is not None:
-  import pdb;pdb.set_trace()
-  system_name = '\\mathcal{F}'
   filename = init_data_path + '.h5'
   hf = h5py.File(filename, 'r')
   ft = hf.get('time')[:]
-  fq = hf.get(system_name + '_q')[:]
+  fq = hf.get('dns_q')[:]
   
-  fq = torch.from_numpy(fq)
+  fq = torch.from_numpy(fq[-1])
   fqh = to_spectral(fq)
 
   h.pde.cur.t = ft[-1]
@@ -128,8 +128,8 @@ print('LES Model: ', m1)
 # Will produce two images in folder `output` with the final fields after <iters> iterations.
 workflow.workflow(
   dir='output/',
-  name='geo_100',
-  iters=100,# 10000,  # Model iterations; 6.15min/1K iters on 1CPU
+  name=data_store_name,
+  iters=iters,# 10000,  # Model iterations; 6.15min/1K iters on 1CPU
   steps=100,    # Discrete steps
   scale=scale,  # Kernel scale
   diags=[       # Diagnostics
