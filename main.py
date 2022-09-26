@@ -72,7 +72,7 @@ h = QgModel(
 )
 
 # Initial conditions.
-init_data_path = 'output/geo_40000_dump'
+init_data_path = 'output/geo_100_dump' # None
 if init_data_path is not None:
   import pdb;pdb.set_trace()
   filename = init_data_path + '.h5'
@@ -126,8 +126,8 @@ print('LES Model: ', m1)
 # Will produce two images in folder `output` with the final fields after <iters> iterations.
 workflow.workflow(
   dir='output/',
-  name='geo_6000',
-  iters=6000,# 10000,  # Model iterations; 6.15min/1K iters on 1CPU
+  name='geo_100',
+  iters=100,# 10000,  # Model iterations; 6.15min/1K iters on 1CPU
   steps=100,    # Discrete steps
   scale=scale,  # Kernel scale
   diags=[       # Diagnostics
