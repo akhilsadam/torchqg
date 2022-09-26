@@ -72,7 +72,23 @@ h = QgModel(
 )
 
 # Initial conditions.
-h.init_randn(0.01, [3.0, 5.0])
+init_data_path = 'output/geo_40000_dump'
+if init_data_path is not None:
+  import pdb;pdb.set_trace()
+  filename = init_data_path + '.h5'
+  hf = h5py.File(filename, 'r')
+  ft = hf.get('time')
+  fq = hf.get(system_name + '_q')
+  ft = ft[:]
+  fq = fq[:]
+  fqh = to_spectral(fq)
+
+  h.pde.cur.t0 = ft[-1]
+  h.pde.sol = fqh
+else:
+  h.init_randn(0.01, [3.0, 5.0])
+
+
 # Set up spectral filter kernel.
 h.kernel = h.grid.cutoff
 
