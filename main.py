@@ -75,15 +75,16 @@ h = QgModel(
 init_data_path = 'output/geo_100_dump' # None
 if init_data_path is not None:
   import pdb;pdb.set_trace()
+  system_name = '\\mathcal{F}'
   filename = init_data_path + '.h5'
   hf = h5py.File(filename, 'r')
-  ft = hf.get('time')
-  fq = hf.get(system_name + '_q')
-  ft = ft[:]
-  fq = fq[:]
+  ft = hf.get('time')[:]
+  fq = hf.get(system_name + '_q')[:]
+  ft = torch.from_numpy(ft)
+  fq = torch.from_numpy(fq)
   fqh = to_spectral(fq)
 
-  h.pde.cur.t0 = ft[-1]
+  h.pde.cur.t = ft[-1]
   h.pde.sol = fqh
 else:
   h.init_randn(0.01, [3.0, 5.0])
