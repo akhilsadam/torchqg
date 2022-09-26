@@ -80,7 +80,7 @@ if init_data_path is not None:
   hf = h5py.File(filename, 'r')
   ft = hf.get('time')[:]
   fq = hf.get(system_name + '_q')[:]
-  ft = torch.from_numpy(ft)
+  
   fq = torch.from_numpy(fq)
   fqh = to_spectral(fq)
 
