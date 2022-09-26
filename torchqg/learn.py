@@ -3,7 +3,7 @@ import os
 import torch
 import numpy as np
 
-import qg
+import torchqg.qg as qg
 
 # Useful for a posteriori learning.
 class DynamicalDataset(torch.utils.data.Dataset):

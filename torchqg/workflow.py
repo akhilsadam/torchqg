@@ -1,6 +1,7 @@
 import math
 import os
 import tqdm
+import h5py
 
 import torch
 import numpy as np
@@ -9,7 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import qg
+import torchqg.qg as qg
 
 plt.rcParams.update({'mathtext.fontset':'cm'})
 plt.rcParams.update({'xtick.minor.visible':True})
@@ -28,7 +29,11 @@ def workflow(
 ):
   """
   Args:
+    dir string: Relative path for storing data and figures  
+    iters int: Maximum number of LES iterations
     steps int: Total number of steps that will be stored
+    system qg.QgModel: DNS model
+    models [qg.QgModel,...]: LES models with different parametrizations
   """
   t0 = system.pde.cur.t
   store_les = int(iters / steps) # Data will be stored every <store_les> time steps
@@ -51,23 +56,30 @@ def workflow(
   les = {}
   for m in models:
     les[m.name] = torch.zeros([steps, 5, Nyl, Nxl], dtype=torch.float64)
-
+  # Time
   time = torch.zeros([steps])
 
   def visitor_dns(m, cur, it):
+    """
+    Logs DNS and filtered DNS data
+    """
     # High res
     if it % store_dns == 0:
       i = int(it / store_dns)
       q, p, u, v = m.update()
 
-      # Exact sgs
+      # Calculate filtered DNS from DNS; see Frezat et al., eq. (16)
       if models:
-        r = m.R(sgs_grid, scale)
+        r = m.R(sgs_grid, scale) # Exact SGS param # (128,33)
         fdns[i, 0] = qg.to_physical(r)
         fdns[i, 1] = m.filter_physical(sgs_grid, scale, q).view(1, Nyl, Nxl)
         fdns[i, 2] = m.filter_physical(sgs_grid, scale, p).view(1, Nyl, Nxl)
         fdns[i, 3] = m.filter_physical(sgs_grid, scale, u).view(1, Nyl, Nxl)
         fdns[i, 4] = m.filter_physical(sgs_grid, scale, v).view(1, Nyl, Nxl)
+        print(f'Ground-truth fdns at iter {cur.n} and t={cur.t}, but iter it={it} and index {i}')
+        print('vorticity(t): \t', fdns[i,1,:4,0])
+        print('r(it)         \t', fdns[i,0,:4,0])
+
       dns[i] = torch.stack((q, p, u, v))
 
       # step time
@@ -82,7 +94,8 @@ def workflow(
 
       # Predicted sgs
       if m.sgs:
-        r = m.sgs.predict(m, 0, m.pde.sol, m.grid)
+        # print(f'SGS {type(m.sgs).__name__} at iter {m.pde.cur.n} and t={m.pde.cur.t}, but iter i={i}')
+        r = m.sgs.predict(m, it, m.pde.sol, m.grid, verbose=True)
       else:
         r = torch.zeros([Nyl, Nxl], dtype=torch.float64)
       les[m.name][i] = torch.stack((qg.to_physical(r), q, p, u, v))
@@ -96,7 +109,7 @@ def workflow(
       system.pde.step(system)
       visitor_dns(system, system.pde.cur, it)
       for m in models:
-        if it % scale == 0:
+        if it % scale == 0: # Only steps LES every <scale> iters
           m.pde.step(m)
           visitor_les(m, m.pde.cur, it / scale)
 
@@ -113,6 +126,7 @@ def workflow(
         les=les
       )
     if dump:
+      import pdb;pdb.set_trace()
       hf = h5py.File(os.path.join(dir, name + '_dump.h5'), 'w')
       hf.create_dataset('time', data=time.detach().numpy())
       hf.create_dataset(system.name + '_r', data=fdns[:, 0].detach().numpy())

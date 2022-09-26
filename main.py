@@ -8,10 +8,10 @@ import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
 
-from qg import to_spectral, to_physical, QgModel
-from sgs import Constant # MLdiv
+from torchqg.qg import to_spectral, to_physical, QgModel
+from torchqg.sgs import Constant # MLdiv
 
-import workflow
+import torchqg.workflow as workflow
 
 plt.rcParams.update({'mathtext.fontset':'cm'})
 
@@ -19,10 +19,12 @@ plt.rcParams.update({'mathtext.fontset':'cm'})
 # Graham and Ringler (2013).
 
 def t_unit():
+  # T_d(x) = 1.2 x 10^6/pi s
   return 1.2e6
 
 def l_unit():
-  return (504e4 / math.pi)
+  # L_d(x) = 504 x 10^4/pi m
+  return (504e4 / math.pi) 
 
 Lx = 2*math.pi
 Ly = 2*math.pi
@@ -31,7 +33,7 @@ Ny = 512
 
 dt = 480 / t_unit() # 480s
 mu = 1.25e-8 / l_unit()**(-1) # 1.25e-8m^-1
-nu = 352 / l_unit()**2 / t_unit()**(-1) # 22m^2s^-1 for the simulation (2048^2)
+nu = 352 / l_unit()**2 / t_unit()**(-1) # 352m^2/s for (512^2) and 22m^2s^-1 for (2048^2)
 
 # Wind stress forcing.
 def Fs(i, sol, dt, t, grid):
@@ -105,11 +107,11 @@ m1 = QgModel(
 m1.pde.sol = h.filter(m1.grid, scale, h.pde.sol)
 print('LES Model: ', m1)
 
-# Will produce two images in folder `output` with the final fields after 2000 iterations.
+# Will produce two images in folder `output` with the final fields after <iters> iterations.
 workflow.workflow(
   dir='output/',
-  name='geo',
-  iters=100,# 10000,  # Model iterations
+  name='geo_6000',
+  iters=6000,# 10000,  # Model iterations; 6.15min/1K iters on 1CPU
   steps=100,    # Discrete steps
   scale=scale,  # Kernel scale
   diags=[       # Diagnostics
@@ -117,5 +119,6 @@ workflow.workflow(
   ],
   system=h,       # DNS system
   # models=[],
-  models=[m1]     # LES without model
+  models=[m1],     # LES without model
+  dump=True
 )

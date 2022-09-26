@@ -66,8 +66,8 @@ class RungeKutta4:
     dt = cur.dt
     t  = cur.t
 
-    # substep 1
-    eq.nonlinear_term(0, self.rhs1, sol, dt, t, grid)
+    # substep 1  
+    eq.nonlinear_term(i=0, S=self.rhs1, sol=sol, dt=dt, t=t, grid=grid)
     self.rhs1 += eq.linear_term*sol
 
     # substep 2

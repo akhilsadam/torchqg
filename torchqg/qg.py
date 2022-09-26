@@ -9,9 +9,9 @@ import torch.fft
 import matplotlib
 import matplotlib.pyplot as plt
 
-from src.grid import TwoGrid
-from src.timestepper import ForwardEuler, RungeKutta2, RungeKutta4
-from src.pde import Pde, Eq
+from torchqg.grid import TwoGrid
+from torchqg.timestepper import ForwardEuler, RungeKutta2, RungeKutta4
+from torchqg.pde import Pde, Eq
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('device =', device)
@@ -94,12 +94,7 @@ class QgModel:
     grid.dealias(S[:])
 
     if (self.source):
-      S[:] += self.source(
-        i,
-        sol,
-        dt,
-        t,
-        grid)
+      S[:] += self.source(i, sol, dt, t, grid)
 
   def nonlinear_les(self, i, S, sol, dt, t, grid):
     qh = sol.clone()
@@ -131,19 +126,11 @@ class QgModel:
     S[:] = -1j * grid.kr * uqh - 1j * grid.ky * vqh
 
     if (self.sgs):
-      S[:] += self.sgs.predict(
-        self,
-        i,
-        sol,
-        grid)
+      # Calculate and add SGS term as forcing in spectral space
+      S[:] += self.sgs.predict(self, i, sol, grid)
 
     if (self.source):
-      S[:] += self.source(
-        i, 
-        sol, 
-        dt, 
-        t, 
-        grid)
+      S[:] += self.source(i, sol, dt, t, grid)
 
   def linear_term(self, grid):
     Lc = -self.mu - self.nu * grid.krsq**self.nv - 1j * self.B * grid.kr * grid.irsq
@@ -167,20 +154,23 @@ class QgModel:
     
   def update(self):
     """
-    Calculates streamfunction and velocities from vorticity
-    """ 
+    Returns all state variables in physical space by calculating 
+    streamfunction and velocities from vorticity
+    
+    Returns:
+      q torch.Tensor([self.grid.Ny, self.grid.Nx]): Potential vorticity
+      p torch.Tensor([self.grid.Ny, self.grid.Nx]): Streamfunction
+      u torch.Tensor([self.grid.Ny, self.grid.Nx]): x-axis velocity
+      v torch.Tensor([self.grid.Ny, self.grid.Nx]): y-axis velocity
+    """
     qh = self.pde.sol.clone() # PDE solution only stores pot. vorticity
     ph = -qh * self.grid.irsq
     uh = -1j * self.grid.ky * ph
     vh =  1j * self.grid.kr * ph
 
-    # Potential vorticity
     q = to_physical(qh)
-    # Streamfunction
     p = to_physical(ph)
-    # x-axis velocity
     u = to_physical(uh)
-    # y-axis velocity
     v = to_physical(vh)
     return q, p, u, v
 
@@ -204,7 +194,15 @@ class QgModel:
 
   def R(self, grid, scale):
     """
-    R is the SGS parametrization
+    Returns the exact SGS parametrization, R, for the large-scale
+    grid <grid> and with reduced scale by factor <scale> based
+    on filtering the DNS solution that is stored in self.pde.sol
+
+    Args:
+      grid src.grid.TwoGrid
+      scale int
+    Returns:
+      R_field torch.Tensor([]): SGS param in spectral space
     """
     return self.R_field(grid, scale, self.pde.sol)
 
