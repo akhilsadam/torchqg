@@ -76,9 +76,9 @@ def workflow(
         fdns[i, 2] = m.filter_physical(sgs_grid, scale, p).view(1, Nyl, Nxl)
         fdns[i, 3] = m.filter_physical(sgs_grid, scale, u).view(1, Nyl, Nxl)
         fdns[i, 4] = m.filter_physical(sgs_grid, scale, v).view(1, Nyl, Nxl)
-        print(f'Ground-truth fdns at iter {cur.n} and t={cur.t}, but iter it={it} and index {i}')
-        print('vorticity(t): \t', fdns[i,1,:4,0])
-        print('r(it)         \t', fdns[i,0,:4,0])
+        #print(f'Ground-truth fdns at iter {cur.n} and t={cur.t}, but iter it={it} and index {i}')
+        #print('vorticity(t): \t', fdns[i,1,:4,0])
+        #print('r(it)         \t', fdns[i,0,:4,0])
 
       dns[i] = torch.stack((q, p, u, v))
 
@@ -126,7 +126,6 @@ def workflow(
         les=les
       )
     if dump:
-      import pdb;pdb.set_trace()
       hf = h5py.File(os.path.join(dir, name + '_dump.h5'), 'w')
       hf.create_dataset('time', data=time.detach().numpy())
       hf.create_dataset(system.name + '_r', data=fdns[:, 0].detach().numpy())
