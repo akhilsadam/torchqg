@@ -74,7 +74,9 @@ h = QgModel(
 
 # Initial conditions.
 init_data_path = 'output/spinup_10000_dump' # None
-iters = 100
+raw_data_path = '/nobackup1/lutjens/tmp/mno/' # 'output/'
+iters = 20000
+steps = iters
 data_store_name = 'warmed_'+str(iters) # geo_'+str(iters) # 'warmed_100'
 if init_data_path is not None:
   filename = init_data_path + '.h5'
@@ -127,10 +129,10 @@ print('LES Model: ', m1)
 
 # Will produce two images in folder `output` with the final fields after <iters> iterations.
 workflow.workflow(
-  dir='output/',
+  dir=raw_data_path, # 'output/',
   name=data_store_name,
   iters=iters,# 10000,  # Model iterations; 6.15min/1K iters on 1CPU
-  steps=100,    # Discrete steps
+  steps=steps,    # Discrete steps
   scale=scale,  # Kernel scale
   diags=[       # Diagnostics
     workflow.diag_fields,
