@@ -103,7 +103,7 @@ Nyl = int(Ny / scale)
 
 eta_m = torch.zeros([Nyl, Nxl], dtype=torch.float64, requires_grad=True)
 
-# No model.
+# Null-parametrization model.
 m1 = QgModel(
   name='',
   Nx=Nxl,

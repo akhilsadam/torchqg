@@ -13,3 +13,11 @@ See `main.py` in the root folder for a simulation example based on [Graham et al
 
 The code was initially developped for subgrid-scale (SGS) parametrization learning, in particular with an end-to-end approach, i.e. where gradient of the forward solver is available. The first reference describing the setup can be accessed [here](https://arxiv.org/pdf/2111.06841.pdf).
 
+
+## Install
+```
+git clone git@github.com:<user>/torchqg.git
+git checkout mno
+cd torchqg
+
+```
