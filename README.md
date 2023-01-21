@@ -19,5 +19,4 @@ The code was initially developped for subgrid-scale (SGS) parametrization learni
 git clone git@github.com:<user>/torchqg.git
 git checkout mno
 cd torchqg
-
 ```
