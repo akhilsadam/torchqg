@@ -37,8 +37,9 @@ class MLdiv:
 
 class MNOparam:
   def __init__(self, model):
-    self.model = model
+    self.model = model # Deep Learning model
     self.model.eval()
+    self.model.test(model, mode=True) # Activates normalization during test
 
   def predict(self, m, it, sol, grid, verbose=False):
     # Prepare MNO vorticity input

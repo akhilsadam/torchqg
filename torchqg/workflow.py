@@ -6,6 +6,7 @@ import h5py
 import torch
 import numpy as np
 
+from pprint import pprint
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -28,10 +29,15 @@ def workflow(
   dump=False,
 ):
   """
+  Solves the equation and stores the results
+
   Args:
-    dir string: Relative path for storing data and figures  
+    dir string: Relative path for storing data and figures
+    name:
     iters int: Maximum number of LES iterations
     steps int: Total number of steps that will be stored
+    scale int: Scale of coarse-graining kernel (DNS -> LES), e.g., 4
+    diags [fn]: List of evaluation, diagnostics, plotting functions
     system qg.QgModel: DNS model
     models [qg.QgModel,...]: LES models with different parametrizations
   """
@@ -145,8 +151,68 @@ def workflow(
         hf.create_dataset(m.name + '_v', data=les[m.name][:, 4].detach().numpy())
       hf.close()
 
+def diag_pred_vs_target(dir, name, scale, time, system, models, dns, fdns, les):
+  """
+  Creates 2D plot with input (vorticity) and ground truth parametrization vs. predicted params
+  """
+
+  cols = len(models) + 3
+  rows = 1
+  width_ratios = np.concatenate((np.array([1, 0.1]), np.repeat(rows, cols-2), np.array([0.1])))
+  
+  m_fig, m_axs = plt.subplots(
+    nrows=rows,
+    ncols=cols + 1,
+    figsize=((cols-1) * 2.4 + 2*0.5, rows * 2.5),
+    constrained_layout=True,
+    gridspec_kw={"width_ratios": width_ratios} # np.append(np.repeat(rows, cols), 0.1)}
+  )
+  r_idx = 0
+  q_idx = 1
+  eval_tstep = 0 # Time step that will be plotted
+
+  # Plot large-scale vorticity, which is used as input
+  data = les[models[0].name][eval_tstep, q_idx]
+  c0 = m_axs[0].contourf(models[0].grid.x.cpu().detach().numpy(), models[0].grid.y.cpu().detach().numpy(), data.cpu().detach().numpy(), cmap='bwr', levels=100) # LR vorticity
+  m_fig.colorbar(c0,cax=m_axs[1])
+  m_axs[0].set_ylabel(r'$\omega$', fontsize=20)
+
+  # Plot parametrizations
+  def plot_field(i, label, grid, data, span_r):
+    x = grid.x.cpu().detach().numpy()
+    y = grid.y.cpu().detach().numpy()
+    data_np = data.cpu().detach().numpy()
+
+    c0 = m_axs[i].contourf(x, y, data_np, vmax=span_r, vmin=-span_r, cmap='bwr', levels=100) # parametrization
+
+    if i == 2:
+      m_fig.colorbar(c0,cax=m_axs[-1])
+    m_axs[i].set_xlabel(label, fontsize=20)
+
+  ## Init min, max ranges
+  span_r = max(fdns[eval_tstep, r_idx].max(), abs(fdns[eval_tstep, r_idx].min())).cpu().detach().numpy()
+  # Projected DNS
+  plot_field(2, r'$\overline{\mathcal{M}' + system.name + '}$', models[-1].grid, fdns[eval_tstep, r_idx], span_r)
+  # LES
+  rmse = {}
+  for i, m in enumerate(models):
+    data = les[m.name][eval_tstep, r_idx]
+    # Calculate RMSE
+    rmse[m.name] = torch.mean((data - fdns[eval_tstep, r_idx]) ** 2)
+    
+    plot_field(i + 3, r'$\mathcal{M}_{' + m.name + '}$', m.grid, data, span_r)
+
+  print('RMSE:')
+  pprint(rmse)
+
+  m_fig.savefig(os.path.join(dir, name + '_params.png'), dpi=300)
+  plt.show()
+  plt.close(m_fig)
+
 def diag_fields(dir, name, scale, time, system, models, dns, fdns, les):
   # Plotting
+
+  ## Create 2D plot of DNS vorticity, streamfunction, vel_x and vel_y at the final timestep
   cols = 1
   rows = 4
   m_fig, m_axs = plt.subplots(
@@ -176,6 +242,7 @@ def diag_fields(dir, name, scale, time, system, models, dns, fdns, les):
   if not models:
     return
 
+  ## Create 2D plot of DNS vs. Parametrizations, plotting vorticity, streamfunction, vel_x, vel_y, and parametrization at the final timestep
   cols = len(models) + 1
   rows = 5
   #rep = torch.repeat_interleave(torch.Tensor([rows]), cols)
@@ -201,11 +268,11 @@ def diag_fields(dir, name, scale, time, system, models, dns, fdns, les):
     y = grid.y.cpu().detach().numpy()
     data_np = data.cpu().detach().numpy()
 
-    c0 = m_axs[0, i].contourf(x, y, data_np[-1, 1], vmax=span_q, vmin=-span_q, cmap='bwr', levels=100)
-    c1 = m_axs[1, i].contourf(x, y, data_np[-1, 2], vmax=span_p, vmin=-span_p, cmap='bwr', levels=100)
-    c2 = m_axs[2, i].contourf(x, y, data_np[-1, 3], vmax=span_u, vmin=-span_u, cmap='bwr', levels=100)
-    c3 = m_axs[3, i].contourf(x, y, data_np[-1, 4], vmax=span_v, vmin=-span_v, cmap='bwr', levels=100)
-    c4 = m_axs[4, i].contourf(x, y, data_np[-1, 0], vmax=span_r, vmin=-span_r, cmap='bwr', levels=100)
+    c0 = m_axs[0, i].contourf(x, y, data_np[-1, 1], vmax=span_q, vmin=-span_q, cmap='bwr', levels=100) # vorticity
+    c1 = m_axs[1, i].contourf(x, y, data_np[-1, 2], vmax=span_p, vmin=-span_p, cmap='bwr', levels=100) # streamfunction
+    c2 = m_axs[2, i].contourf(x, y, data_np[-1, 3], vmax=span_u, vmin=-span_u, cmap='bwr', levels=100) # vel x
+    c3 = m_axs[3, i].contourf(x, y, data_np[-1, 4], vmax=span_v, vmin=-span_v, cmap='bwr', levels=100) # vel y
+    c4 = m_axs[4, i].contourf(x, y, data_np[-1, 0], vmax=span_r, vmin=-span_r, cmap='bwr', levels=100) # parametrization
     if i == 0:
       m_fig.colorbar(c0, cax=m_axs[0, cols])
       m_fig.colorbar(c1, cax=m_axs[1, cols])
