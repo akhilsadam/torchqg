@@ -10,7 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from torchqg.grid import TwoGrid
-from torchqg.timestepper import ForwardEuler, RungeKutta2, RungeKutta4
+from torchqg.timestepper import ForwardEuler, RungeKutta2, RungeKutta4, PureMLStepper
 from torchqg.pde import Pde, Eq
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -97,18 +97,18 @@ class QgModel:
       S[:] += self.source(i, sol, dt, t, grid)
 
   def nonlinear_les(self, i, S, sol, dt, t, grid):
-    qh = sol.clone()
+    qh = sol.clone() # e.g., shape (128, 65)
     ph = -qh * grid.irsq
     uh = -1j * grid.ky * ph
     vh =  1j * grid.kr * ph
     eh = to_spectral(self.eta)
 
-    qhh = self.da.increase(qh)
+    qhh = self.da.increase(qh) # e.g., shape (192, 97)
     uhh = self.da.increase(uh)
     vhh = self.da.increase(vh)
     ehh = self.da.increase(eh)
 
-    q = to_physical(qhh)
+    q = to_physical(qhh) # e.g., shape (192, 192)
     u = to_physical(uhh)
     v = to_physical(vhh)
     e = to_physical(ehh)
@@ -117,13 +117,13 @@ class QgModel:
     uq = u * qe
     vq = v * qe
 
-    uqhh = to_spectral(uq)
+    uqhh = to_spectral(uq) # e.g., shape (192, 97)
     vqhh = to_spectral(vq)
 
-    uqh = grid.reduce(uqhh)
+    uqh = grid.reduce(uqhh) # e.g., shape (128, 65)
     vqh = grid.reduce(vqhh)
 
-    S[:] = -1j * grid.kr * uqh - 1j * grid.ky * vqh
+    S[:] = -1j * grid.kr * uqh - 1j * grid.ky * vqh # e.g., shape (128, 65)
 
     if (self.sgs):
       # Calculate and add SGS term as forcing in spectral space
@@ -331,3 +331,65 @@ class QgModel:
   def zero_grad(self):
     self.stepper.zero_grad()
 
+class QgModelPureML(QgModel):
+  def __init__(self, name, Nx, Ny, Lx, Ly, dt, t0, B=None, mu=None, nu=None, nv=None, eta=None, source=None, kernel=None, sgs=None, model=None):
+    """
+    Args:
+      model: torch.model Takes in current solution q and predict solution at next time step qnext
+      dtype: dtype at which model is integrating
+    """
+    # ML model is subclass s.t. it can inherit most of the analysis functions
+    super(QgModel, self).__init__()
+
+    self.name = name
+
+    self.grid = TwoGrid(device, Nx=Nx, Ny=Ny, Lx=Lx, Ly=Ly)
+    self.eq = Eq(grid=self.grid, linear_term=self.zeros(self.grid), nonlinear_term=self.nonlinear_pure_ml)
+
+    self.stepper = PureMLStepper(eq=self.eq)
+
+    self.pde = Pde(dt=dt, t0=t0, eq=self.eq, stepper=self.stepper)
+    self.kernel = kernel
+    self.sgs = None
+    
+    self.model = model
+    self.model.eval()
+    self.model.test(model, mode=True) # Activates normalization during test
+
+  def nonlinear_pure_ml(self, i, S, sol, dt=None, t=None, grid=None):
+    """
+    Uses ML model to forecast the next step given the current.
+    Only forecasts q.
+
+    Args:
+      S torch((grid.irsq.shape)): Placeholder for the solution at t+1
+      sol torch((grid.irsq.shape)): Current solution at t
+      not used: i, dt, t, grid
+    """
+    qh = sol.clone() # Current potential vorticity
+
+    # Convert to expected model input
+    q = to_physical(qh)
+    q = q[None,...,None].type(torch.float32)
+
+    # Forecast next step with model
+    qnext = self.model(q).squeeze()
+
+    # Project back into spectral space, s.t., all analysis functions work
+    S[:] = to_spectral(qnext)
+
+  def zeros(self, grid):
+    "These zeros are used as linear term and are queried to get the solution shape."
+    # return torch.zeros((grid.Nx, grid.Ny), dtype=self.dtype)
+    return torch.zeros((grid.irsq.shape), dtype=torch.complex128)
+
+  def __str__(self):
+    return """Qg model forecasting large-scale dynamics with Pure ML
+       Grid: [{nx},{ny}] in [{lx},{ly}]
+       dt: {dt}
+       """.format(
+      nx=self.grid.Nx, 
+      ny=self.grid.Ny, 
+      lx=self.grid.Lx,
+      ly=self.grid.Ly,
+      dt=self.pde.cur.dt)

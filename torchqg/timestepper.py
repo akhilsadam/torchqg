@@ -88,3 +88,16 @@ class RungeKutta4:
     sol += dt*(self.rhs1/6.0 + self.rhs2/3.0 + self.rhs3/3.0 + self.rhs4/6.0)
     cur.step()
 
+class PureMLStepper:
+  def __init__(self, eq):
+    self.n    = 1
+    self.S    = torch.zeros(eq.dim, dtype=torch.complex128, requires_grad=True).to(eq.device)
+
+  def zero_grad(self):
+    self.S.detach_()
+
+  def step(self, m, sol, cur, eq, grid):
+    eq.nonlinear_term(i=0, S=self.S, sol=sol, dt=None, t=None, grid=None)
+    sol[:] = self.S
+    cur.step()
+

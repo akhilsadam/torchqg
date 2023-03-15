@@ -33,4 +33,3 @@ class Pde:
 
   def step(self, m):
     self.stepper.step(m, self.sol, self.cur, self.eq, self.grid)
-

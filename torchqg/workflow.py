@@ -103,7 +103,8 @@ def workflow(
         # print(f'SGS {type(m.sgs).__name__} at iter {m.pde.cur.n} and t={m.pde.cur.t}, but iter i={i}')
         r = m.sgs.predict(m, it, m.pde.sol, m.grid, verbose=True)
       else:
-        r = torch.zeros([Nyl, Nxl], dtype=torch.float64)
+        # r = torch.zeros([Nyl, Nxl], dtype=torch.float64)
+        r = torch.zeros(sgs_grid.irsq.shape, dtype=torch.complex128)
       les[m.name][i] = torch.stack((qg.to_physical(r), q, p, u, v))
     return None
  
@@ -151,9 +152,19 @@ def workflow(
         hf.create_dataset(m.name + '_v', data=les[m.name][:, 4].detach().numpy())
       hf.close()
 
-def diag_pred_vs_target(dir, name, scale, time, system, models, dns, fdns, les):
+def diag_pred_vs_target_param(dir, name, scale, time, system, models, dns, fdns, les):
   """
   Creates 2D plot with input (vorticity) and ground truth parametrization vs. predicted params
+  Args:
+    dir str: Directory to save plot
+    name str: Filename of plot
+    scale: --
+    time: --
+    system: DNS (not used here)
+    models: list of LES model objects
+    dns: --
+    fdns: ground-truth filtered DNS data
+    les: predicted LES data
   """
 
   cols = len(models) + 3
@@ -202,12 +213,84 @@ def diag_pred_vs_target(dir, name, scale, time, system, models, dns, fdns, les):
     
     plot_field(i + 3, r'$\mathcal{M}_{' + m.name + '}$', m.grid, data, span_r)
 
-  print('RMSE:')
+  print('RMSE of predicted vs. ground-truth parametrization:')
   pprint(rmse)
 
-  m_fig.savefig(os.path.join(dir, name + '_params.png'), dpi=300)
+  filepath = os.path.join(dir, name + '_params.png')
+  m_fig.savefig(filepath, dpi=300)
   plt.show()
   plt.close(m_fig)
+
+  print('Plotted ground truth vs. target parametrization at: ', filepath)
+
+def diag_pred_vs_target_sol_err(dir, name, scale, time, system, models, dns, fdns, les):
+  """
+  Creates 2D plot with input (vorticity at t), ground truth vorticity at t+1, and 
+    error of LES with null param, and LES with predicted solution
+  Args:
+    dir str: Directory to save plot
+    name str: Filename of plot
+    scale: --
+    time: --
+    system: DNS (not used here)
+    models: list of LES model objects
+    dns: --
+    fdns: ground-truth filtered DNS data
+    les: predicted LES data
+  """
+  cols = len(models)*2 + 2
+  rows = 1
+  width_ratios = np.concatenate((np.array([1, 0.1]), np.array([1., 0.1]*len(models))))
+
+  m_fig, m_axs = plt.subplots(
+    nrows=rows,
+    ncols=cols,
+    figsize=(cols * 1.5, rows * 2.5),
+    constrained_layout=True,
+    gridspec_kw={"width_ratios": width_ratios} # np.append(np.repeat(rows, cols), 0.1)}
+  )
+  q_idx = 1 # index of vorticity
+  eval_tstep = 0 # Time step that is used as input
+
+  # Plot large-scale vorticity, which is used as input
+  data = les[models[0].name][eval_tstep, q_idx]
+  c0 = m_axs[0].contourf(models[0].grid.x.cpu().detach().numpy(), models[0].grid.y.cpu().detach().numpy(), data.cpu().detach().numpy(), cmap='bwr', levels=100) # LR vorticity
+  m_fig.colorbar(c0,cax=m_axs[1])
+  m_axs[0].set_xlabel(r'input: $\omega$', fontsize=20)
+
+  # Plot predicted vorticities
+  def plot_field(i, label, grid, data, span_qerr):
+    x = grid.x.cpu().detach().numpy()
+    y = grid.y.cpu().detach().numpy()
+    data_np = data.cpu().detach().numpy()
+    c0 = m_axs[i].contourf(x, y, data_np, cmap='bwr', levels=100) # vmax=span_qerr, vmin=-span_qerr, )
+    m_fig.colorbar(c0,cax=m_axs[i+1])
+    m_axs[i].set_xlabel(label, fontsize=20)
+
+  ## Init min, max ranges with range of null parametrization error. Assumes null parametrization is first input
+  # null_qerr = les[models[0].name][eval_tstep+1, q_idx] - fdns[eval_tstep+1, q_idx]
+  # span_qerr = max(null_qerr.max(), abs(null_qerr.min())).cpu().detach().numpy()
+  span_qerr = None
+  
+  # Predicted LES at next time step
+  rmse = {}
+  for i, m in enumerate(models):
+    data = les[m.name][eval_tstep+1, q_idx]
+    err = data - fdns[eval_tstep+1, q_idx]
+    # Calculate RMSE
+    rmse[m.name] = torch.mean(err ** 2)
+    
+    plot_field(i*2 + 2, r'err: $\mathcal{M}_{' + m.name + '}$', m.grid, err, span_qerr)
+
+  print('RMSE of predicted - ground-truth solution:')
+  pprint(rmse)
+
+  filepath = os.path.join(dir, name + '_sol_err.png')
+  m_fig.savefig(filepath, dpi=300)
+  plt.show()
+  plt.close(m_fig)
+
+  print('Plotted ground truth vs. target solution at: ', filepath)
 
 def diag_fields(dir, name, scale, time, system, models, dns, fdns, les):
   # Plotting
