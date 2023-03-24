@@ -208,11 +208,16 @@ class QgModel:
 
   def R_field(self, grid, scale, yh):
     """
-    See eq (17) in Frezat et al., 22
+    See eq (20) in Frezat et al., 22
+    https://doi.org/10.1029/2022MS003124
     """
     return grid.div(torch.stack(self.R_flux(grid, scale, yh), dim=0))
 
   def R_flux(self, grid, scale, yh):
+    """
+    See eq (20) in Frezat et al., 22
+    https://doi.org/10.1029/2022MS003124
+    """    
     # Calc. streamfn and velocities from vorticity
     qh = yh.clone()
     ph = -qh * self.grid.irsq # \psi = \nabla^2 \omega

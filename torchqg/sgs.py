@@ -48,6 +48,7 @@ class MNOparam:
     
     q = q.to(torch.float32).unsqueeze(-1).unsqueeze(0) # convert to ML shape
     r = self.model(q)
+    print('r min,max, mean, std: ', r.min(), r.max(), r.mean(), r.std())
     r = r.view(grid.Ny, grid.Nx) # convert to diffeq shape
     return qg.to_spectral(r)
 

@@ -44,7 +44,7 @@ def workflow(
   t0 = system.pde.cur.t
   store_les = int(iters / steps) # Data will be stored every <store_les> time steps
   store_dns = store_les * scale
-
+  
   Nx = system.grid.Nx
   Ny = system.grid.Ny
   Nxl = int(Nx / scale)
@@ -114,8 +114,10 @@ def workflow(
   with torch.no_grad():
     for it in tqdm.tqdm(range(iters * scale)):
       system.pde.step(system)
+      # Step dns on every iter, but only store every <store_dns - 4> iters
       visitor_dns(system, system.pde.cur, it)
       for m in models:
+        # Step les only every <scale - 4> iters, but store every <store_les - 1> step
         if it % scale == 0: # Only steps LES every <scale> iters
           m.pde.step(m)
           visitor_les(m, m.pde.cur, it / scale)
@@ -180,7 +182,8 @@ def diag_pred_vs_target_param(dir, name, scale, time, system, models, dns, fdns,
   )
   r_idx = 0
   q_idx = 1
-  eval_tstep = 0 # Time step that will be plotted
+  last_tstep = les[models[0].name].shape[0]-1
+  eval_tstep =  last_tstep # 0 # Time step that will be plotted
 
   # Plot large-scale vorticity, which is used as input
   data = les[models[0].name][eval_tstep, q_idx]
@@ -250,7 +253,8 @@ def diag_pred_vs_target_sol_err(dir, name, scale, time, system, models, dns, fdn
     gridspec_kw={"width_ratios": width_ratios} # np.append(np.repeat(rows, cols), 0.1)}
   )
   q_idx = 1 # index of vorticity
-  eval_tstep = 0 # Time step that is used as input
+  last_tstep = les[models[0].name].shape[0]-1
+  eval_tstep = last_tstep - 1 # 0 # Time step that will be plotted
 
   # Plot large-scale vorticity, which is used as input
   data = les[models[0].name][eval_tstep, q_idx]
@@ -271,7 +275,9 @@ def diag_pred_vs_target_sol_err(dir, name, scale, time, system, models, dns, fdn
   # null_qerr = les[models[0].name][eval_tstep+1, q_idx] - fdns[eval_tstep+1, q_idx]
   # span_qerr = max(null_qerr.max(), abs(null_qerr.min())).cpu().detach().numpy()
   span_qerr = None
-  
+
+  print('fdns, les', fdns.shape, les[models[0].name].shape)
+  import pdb;pdb.set_trace()
   # Predicted LES at next time step
   rmse = {}
   for i, m in enumerate(models):
