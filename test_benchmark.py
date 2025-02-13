@@ -40,5 +40,6 @@ def test_benchmark(save=False):
   assert torch.allclose(dns_dev, ref, atol=1e-20), f'Benchmark failed'
 
 
+# test
 if __name__ == '__main__':
   test_benchmark(True)
