@@ -39,4 +39,5 @@ dns_dev = solver(system, dir='bench', **params)
 
 # compare output to reference dns_0.pt
 ref = torch.load('bench/dns_0.pt', weights_only=True)
-assert torch.allclose(dns_dev, ref, atol=1e-6), f'Benchmark failed; error = {torch.nn.functional.mse_loss(dns_dev,ref)}'
+print('MSE:', torch.nn.functional.mse_loss(dns_dev, ref))
+assert torch.allclose(dns_dev, ref, atol=1e-20), f'Benchmark failed'
