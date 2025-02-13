@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 from qg import to_spectral, to_physical, QgModel
 from sgs import Constant # MLdiv
 
-import workflow
+import os
+from tqdm import tqdm
 
 plt.rcParams.update({'mathtext.fontset':'cm'})
 
@@ -29,7 +30,8 @@ Ly = 2*math.pi
 Nx = 512
 Ny = 512
 
-dt = 480 / t_unit() # 480s
+iterations = 100
+dt = 120 / t_unit() # 480s
 mu = 1.25e-8 / l_unit()**(-1) # 1.25e-8m^-1
 nu = 352 / l_unit()**2 / t_unit()**(-1) # 22m^2s^-1 for the simulation (2048^2)
 
@@ -75,47 +77,53 @@ h.init_randn(0.01, [3.0, 5.0])
 h.kernel = h.grid.cutoff
 
 print(h)
-# Low res model(s).
-scale = 4
 
-Nxl = int(Nx / scale)
-Nyl = int(Ny / scale)
+def workflow(
+  dir,
+  iters, 
+  steps,
+  scale,
+  system,
+):
+  """
+  Args:
+    steps int: Total number of steps that will be stored
+  """
+  t0 = system.pde.cur.t
+  store_les = int(iters / steps) # Data will be stored every <store_les> time steps
+  store_dns = store_les * scale
 
-eta_m = torch.zeros([Nyl, Nxl], dtype=torch.float64, requires_grad=True)
+  Nx = system.grid.Nx
+  Ny = system.grid.Ny
+  
+  # DNS
+  dns  = torch.zeros([steps, 4, Ny,  Nx ], dtype=torch.float64)
+  time = torch.zeros([steps])
 
-# No model.
-m1 = QgModel(
-  name='',
-  Nx=Nxl,
-  Ny=Nyl,
-  Lx=Lx,
-  Ly=Ly,
-  dt=dt,
-  t0=0.0,
-  B=0.0,     # Planetary vorticity y-gradient
-  mu=mu,     # Linear drag
-  nu=nu,     # Viscosity coefficient
-  nv=1,      # Hyperviscous order (nv=1 is viscosity)
-  eta=eta_m, # Topographic PV
-  source=Fs, # Source term
-  sgs=Constant(c=0.0) # Subgrid-scale term (replace with yours)
-)
+  def visitor_dns(m, cur, it):
+    # High res
+    if it % store_dns == 0:
+      i = int(it / store_dns)
+      q, p, u, v = m.update()
 
-# Initialize from DNS vorticity field.
-m1.pde.sol = h.filter(m1.grid, scale, h.pde.sol)
-print('LES Model: ', m1)
+      dns[i] = torch.stack((q, p, u, v))
 
-# Will produce two images in folder `output` with the final fields after 2000 iterations.
-workflow.workflow(
-  dir='output/',
-  name='geo',
-  iters=100,# 10000,  # Model iterations
-  steps=100,    # Discrete steps
-  scale=scale,  # Kernel scale
-  diags=[       # Diagnostics
-    workflow.diag_fields,
-  ],
-  system=h,       # DNS system
-  # models=[],
-  models=[m1]     # LES without model
+      # step time
+      time[i] = cur.t - t0
+    return None
+
+  with torch.no_grad():
+    for it in tqdm(range(iters * scale)):
+      system.pde.step(system)
+      visitor_dns(system, system.pde.cur, it)
+      
+  os.makedirs(dir, exist_ok=True)
+  torch.save(dns, os.path.join(dir, 'dns_0.pt'))
+  
+workflow(
+  dir='bench',
+  iters=iterations,
+  steps=100,
+  scale=4, # 4x more DNS steps than LES steps
+  system=h
 )
