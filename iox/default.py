@@ -1,7 +1,7 @@
 import math
 import torch
 
-from qg import to_spectral
+from solver import to_spectral
 
 
 def t_unit():
@@ -32,8 +32,8 @@ params = {
   "Ly": 2 * math.pi,
   "Nx": 512,
   "Ny": 512,
-  "iterations": 100,
-  "scale": 4,
+  "iterations": 2,
+  "scale": 200,
   "dt": 120 / t_unit(),  # 480s
   "t0": 0.0, # Initial time
   "B" : 0.0, # Planetary vorticity y-gradient
