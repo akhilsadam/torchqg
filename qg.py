@@ -16,11 +16,16 @@ from src.pde import Pde, Eq
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('device =', device)
 
-def to_spectral(y): return torch.fft. rfftn(y, norm='forward')
+def to_spectral(y): return torch.fft.rfftn(y, norm='forward')
 def to_physical(y): return torch.fft.irfftn(y, norm='forward')
 
+
+# A framework for the evaluation of turbulence closures used in mesoscale ocean large-eddy simulations.
+# Graham and Ringler (2013).
+
+
 class QgModel:
-  def __init__(self, name, Nx, Ny, Lx, Ly, dt, t0, B, mu, nu, nv, eta, source=None, kernel=None, sgs=None):
+  def __init__(self, name, Nx, Ny, Lx, Ly, dt, t0, B, mu, nu, nv, eta, source, init, sgs=None, **kwargs):
     """
     Notation: 
     - q, $\omega$ is potential vorticity
@@ -49,12 +54,18 @@ class QgModel:
     else:
       # use 2/3 rule
       self.eq = Eq(grid=self.grid, linear_term=self.linear_term(self.grid), nonlinear_term=self.nonlinear_dns)
+      
+      
     self.stepper = RungeKutta4(eq=self.eq)
 
     self.pde = Pde(dt=dt, t0=t0, eq=self.eq, stepper=self.stepper)
     self.source = source
-    self.kernel = kernel
+    
+    self.kernel = self.grid.cutoff
+      
     self.sgs = sgs
+    
+    init(self) # Initialize IC.
 
   def __str__(self):
     return """Qg model
