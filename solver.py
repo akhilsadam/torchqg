@@ -1,13 +1,8 @@
 import math
 import tqdm
 
-import h5py
-
 import torch
 import torch.fft
-
-import matplotlib
-import matplotlib.pyplot as plt
 
 from src.grid import TwoGrid
 from src.timestepper import ForwardEuler, RungeKutta2, RungeKutta4
@@ -24,8 +19,8 @@ def to_physical(y): return torch.fft.irfftn(y, norm='forward')
 # Graham and Ringler (2013).
 
 
-class QgModel:
-  def __init__(self, name, Nx, Ny, Lx, Ly, dt, t0, B, mu, nu, nv, eta, source, init, sgs=None, **kwargs):
+class PsuedoSpectralSolver:
+  def __init__(self, Nx, Ny, Lx, Ly, dt, t0, B, mu, nu, nv, eta, source, init, sgs=None, **kwargs):
     """
     Notation: 
     - q, $\omega$ is potential vorticity
@@ -37,8 +32,7 @@ class QgModel:
 
     Args:
     """
-    self.name = name
-    
+    self.n_outputs = 4
     self.B = B
     self.mu = mu
     self.nu = nu
@@ -325,21 +319,6 @@ class QgModel:
 
     k, [sk, lk] = self.spectrum([torch.real(sh), torch.real(lh)])
     return k, sk, lk
-
-  # Data
-  def save(self, name):
-    hf = h5py.File(name, 'w')
-    hf.create_dataset('q', data=to_physical(self.p_.sol).cpu().detach())
-    hf.close()
-
-  def load(self, name):
-    hf = h5py.File(name, 'r')
-    fq = hf.get('q')
-    sq = to_spectral(torch.from_numpy(fq[:]).to(device))
-
-    # Copy first wavenumbers
-    self.pde.sol = self.grid.increase(sq)
-    hf.close()
 
   def zero_grad(self):
     self.stepper.zero_grad()
