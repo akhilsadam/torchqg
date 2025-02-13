@@ -35,6 +35,7 @@ jobs:
     - name: Run stable version
       run: |
         python3 test_benchmark.py
+        mv bench ../
 
 
     - uses: actions/checkout@v4
@@ -48,4 +49,5 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test dev branch with pytest
       run: |
+        mv ../bench ./
         pytest
