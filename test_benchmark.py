@@ -27,6 +27,7 @@ def test_benchmark(save=False):
 
     os.makedirs(dir, exist_ok=True)
     if save:
+      print('Saving reference dns_0.pt...')
       torch.save(dns, os.path.join(dir, 'dns_0.pt'))
     return dns
 
