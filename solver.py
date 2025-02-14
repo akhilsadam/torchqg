@@ -2,6 +2,7 @@ import math
 import tqdm
 
 import torch
+import torch.nn as nn
 import torch.fft
 
 from src.grid import TwoGrid
@@ -11,15 +12,56 @@ from src.pde import Pde, Eq
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print('device =', device)
 
-def to_spectral(y): return torch.fft.rfftn(y, norm='forward')
-def to_physical(y): return torch.fft.irfftn(y, norm='forward')
+# Utility functions
+def to_spectral(y): 
+  return torch.fft.rfftn(y, norm='forward')
+
+def to_physical(y): 
+  return torch.fft.irfftn(y, norm='forward')
+
+def compute_uv(sol, grid):
+  qh = sol.clone()
+  ph = -qh * grid.irsq
+  uh = -1j * grid.ky * ph
+  vh =  1j * grid.kr * ph
+  return qh, uh, vh
+
+def to_physical_vars(qh, uh, vh):
+  q = to_physical(qh)
+  u = to_physical(uh)
+  v = to_physical(vh)
+  return q, u, v
+
+def to_physical_vars_les(qh, uh, vh, eta, da):
+  eh = to_spectral(eta)
+  qhh, uhh, vhh, ehh = da.increase(qh), da.increase(uh), da.increase(vh), da.increase(eh)
+  q, u, v, e = to_physical(qhh), to_physical(uhh), to_physical(vhh), to_physical(ehh)
+  return q, u, v, e
+
+def compute_uvq(u, v, qe):
+  uq = u * qe
+  vq = v * qe
+  return uq, vq
+
+def update_spectral(S, uq, vq, grid, les=False):
+  uqh = to_spectral(uq)
+  vqh = to_spectral(vq)
+  if les:
+    uqh = grid.reduce(uqh)
+    vqh = grid.reduce(vqh)
+  S[:] = -1j * grid.kr * uqh - 1j * grid.ky * vqh
+  grid.dealias(S[:])
+
+def apply_source(S, source, i, sol, dt, t, grid):
+  if source:
+    S[:] += source(i, sol, dt, t, grid)
+
+def apply_sgs(S, sgs, solver, i, sol, grid):
+  if sgs:
+    S[:] += sgs.predict(solver, i, sol, grid)
 
 
-# A framework for the evaluation of turbulence closures used in mesoscale ocean large-eddy simulations.
-# Graham and Ringler (2013).
-
-
-class PsuedoSpectralSolver:
+class PsuedoSpectralSolver(nn.Module):
   def __init__(self, Nx, Ny, Lx, Ly, dt, t0, B, mu, nu, nv, eta, source, init, sgs=None, **kwargs):
     """
     Notation: 
@@ -32,6 +74,7 @@ class PsuedoSpectralSolver:
 
     Args:
     """
+    super(PsuedoSpectralSolver, self).__init__()
     self.n_outputs = 4
     self.B = B
     self.mu = mu
@@ -79,76 +122,21 @@ class PsuedoSpectralSolver:
       dt=self.pde.cur.dt)
 
   def nonlinear_dns(self, i, S, sol, dt, t, grid):
-    qh = sol.clone()
-    ph = -qh * grid.irsq
-    uh = -1j * grid.ky * ph
-    vh =  1j * grid.kr * ph
-
-    q = to_physical(qh)
-    u = to_physical(uh)
-    v = to_physical(vh)
-
+    qh, uh, vh = compute_uv(sol, grid)
+    q, u, v = to_physical_vars(qh, uh, vh)
     qe = q + self.eta
-    uq = u * qe
-    vq = v * qe
-
-    uqh = to_spectral(uq)
-    vqh = to_spectral(vq)
-    S[:] = -1j * grid.kr * uqh - 1j * grid.ky * vqh
-
-    grid.dealias(S[:])
-
-    if (self.source):
-      S[:] += self.source(
-        i,
-        sol,
-        dt,
-        t,
-        grid)
+    uq, vq = compute_uvq(u, v, qe)
+    update_spectral(S, uq, vq, grid)
+    apply_source(S, self.source, i, sol, dt, t, grid)
 
   def nonlinear_les(self, i, S, sol, dt, t, grid):
-    qh = sol.clone()
-    ph = -qh * grid.irsq
-    uh = -1j * grid.ky * ph
-    vh =  1j * grid.kr * ph
-    eh = to_spectral(self.eta)
-
-    qhh = self.da.increase(qh)
-    uhh = self.da.increase(uh)
-    vhh = self.da.increase(vh)
-    ehh = self.da.increase(eh)
-
-    q = to_physical(qhh)
-    u = to_physical(uhh)
-    v = to_physical(vhh)
-    e = to_physical(ehh)
-
+    qh, uh, vh = compute_uv(sol, grid)
+    q, u, v, e = to_physical_vars_les(qh, uh, vh, self.eta, self.da)
     qe = q + e
-    uq = u * qe
-    vq = v * qe
-
-    uqhh = to_spectral(uq)
-    vqhh = to_spectral(vq)
-
-    uqh = grid.reduce(uqhh)
-    vqh = grid.reduce(vqhh)
-
-    S[:] = -1j * grid.kr * uqh - 1j * grid.ky * vqh
-
-    if (self.sgs):
-      S[:] += self.sgs.predict(
-        self,
-        i,
-        sol,
-        grid)
-
-    if (self.source):
-      S[:] += self.source(
-        i, 
-        sol, 
-        dt, 
-        t, 
-        grid)
+    uq, vq = compute_uvq(u, v, qe)
+    update_spectral(S, uq, vq, grid, les=True)
+    apply_sgs(S, self.sgs, self, i, sol, grid)
+    apply_source(S, self.source, i, sol, dt, t, grid)
 
   def linear_term(self, grid):
     Lc = -self.mu - self.nu * grid.krsq**self.nv - 1j * self.B * grid.kr * grid.irsq
@@ -190,22 +178,11 @@ class PsuedoSpectralSolver:
     return q, p, u, v
 
   def J(self, grid, qh):
-    ph = -qh * grid.irsq
-    uh = -1j * grid.ky * ph
-    vh =  1j * grid.kr * ph
-
-    q = to_physical(qh)
-    u = to_physical(uh)
-    v = to_physical(vh)
-
-    uq = u * q
-    vq = v * q
-
-    uqh = to_spectral(uq)
-    vqh = to_spectral(vq)
-
-    J = 1j * grid.kr * uqh + 1j * grid.ky * vqh
-    return J
+    qh, uh, vh = compute_uv(qh, grid)
+    q, u, v = to_physical_vars(qh, uh, vh)
+    uq, vq = compute_uvq(u, v, q)
+    uqh, vqh = to_spectral(uq), to_spectral(vq)
+    return 1j * grid.kr * uqh + 1j * grid.ky * vqh
 
   def R(self, grid, scale):
     """
@@ -221,37 +198,20 @@ class PsuedoSpectralSolver:
 
   def R_flux(self, grid, scale, yh):
     # Calc. streamfn and velocities from vorticity
-    qh = yh.clone()
-    ph = -qh * self.grid.irsq # \psi = \nabla^2 \omega
-    uh = -1j * self.grid.ky * ph # u = -\partial_y \psi
-    vh =  1j * self.grid.kr * ph # v = \partial_x \psi
-
-    q = to_physical(qh)
-    u = to_physical(uh)
-    v = to_physical(vh)
+    qh, uh, vh = compute_uv(yh, grid)
+    q, u, v = to_physical_vars(qh, uh, vh)
 
     # Calc. \overline{\vec{u} \omega}
-    uq = u * q
-    vq = v * q
-    uqh = to_spectral(uq)
-    vqh = to_spectral(vq)
-    uqh_ = self.kernel(scale * self.grid.delta(), uqh)
-    vqh_ = self.kernel(scale * self.grid.delta(), vqh)
+    uq, vq = compute_uvq(u, v, q)
+    uqh, vqh = to_spectral(uq), to_spectral(vq)
+    uqh_, vqh_ = self.kernel(scale * self.grid.delta(), uqh), self.kernel(scale * self.grid.delta(), vqh)
 
     # Calc. \bar{\vec{u}} \bar\omega
-    uh_  = self.kernel(scale * self.grid.delta(), uh)
-    vh_  = self.kernel(scale * self.grid.delta(), vh)
-    qh_  = self.kernel(scale * self.grid.delta(), qh)
-    u_ = to_physical(uh_)
-    v_ = to_physical(vh_)
-    q_ = to_physical(qh_)
-    u_q_ = u_ * q_
-    v_q_ = v_ * q_
-    u_q_h = to_spectral(u_q_)
-    v_q_h = to_spectral(v_q_)
-
-    tu = u_q_h - uqh_
-    tv = v_q_h - vqh_
+    uh_, vh_, qh_ = self.kernel(scale * self.grid.delta(), uh), self.kernel(scale * self.grid.delta(), vh), self.kernel(scale * self.grid.delta(), qh)
+    u_, v_, q_ = to_physical(uh_), to_physical(vh_), to_physical(qh_)
+    u_q_, v_q_ = u_ * q_, v_ * q_
+    u_q_h, v_q_h = to_spectral(u_q_), to_spectral(v_q_)
+    tu, tv = u_q_h - uqh_, v_q_h - vqh_
     return grid.reduce(tu), grid.reduce(tv)
 
   # Returns filtered spectral variable, y. 
@@ -299,15 +259,8 @@ class PsuedoSpectralSolver:
     return k, e
 
   def invariants(self, qh):
-    ph = -qh * self.grid.irsq
-    uh = -1j * self.grid.ky * ph
-    vh =  1j * self.grid.kr * ph
-
-    # kinetic energy
-    e = torch.abs(uh)**2 + torch.abs(vh)**2
-    # enstrophy
-    z = torch.abs(qh)**2
-
+    qh, uh, vh = compute_uv(qh, self.grid)
+    e, z = torch.abs(uh)**2 + torch.abs(vh)**2, torch.abs(qh)**2
     k, [ek, zk] = self.spectrum([e, z])
     return k, ek, zk
 
