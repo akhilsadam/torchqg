@@ -16,7 +16,7 @@ def solve(params, dir, iterations, scale, save=False, **kwargs):
    
   Nx = system.grid.Nx
   Ny = system.grid.Ny
-  dns  = torch.zeros([iterations, system.n_outputs, Ny,  Nx ], dtype=torch.float64)
+  dns  = torch.zeros([iterations+1, system.n_outputs, Ny,  Nx ], dtype=torch.float64)
   
   with torch.no_grad():
     for it in tqdm(range(iterations * scale)):
@@ -26,6 +26,7 @@ def solve(params, dir, iterations, scale, save=False, **kwargs):
         i = int(it / scale)
         dns[i] = torch.stack(list(system.update())) # q, p, u, v
 
+  dns[-1] = torch.stack(list(system.update()))
   os.makedirs(dir, exist_ok=True)
   if save:
     print('Saving reference dns_0.pt...')
