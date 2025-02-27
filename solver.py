@@ -3,6 +3,7 @@ import tqdm
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.fft
 
 from src.grid import TwoGrid
@@ -18,6 +19,12 @@ def to_spectral(y):
 
 def to_physical(y): 
   return torch.fft.irfftn(y, norm='forward')
+
+def physical_curl(u, v):
+  # shape ...xy 
+  dv_dx = torch.gradient(v, dim = -1)[0]
+  du_dy = torch.gradient(u, dim = -2)[0]
+  return dv_dx - du_dy
 
 def compute_uv(sol, grid):
   qh = sol.clone()
@@ -55,6 +62,13 @@ def update_spectral(S, uq, vq, grid, les=False):
 def apply_source(S, source, i, sol, dt, t, grid):
   if source:
     S[:] += source(i, sol, dt, t, grid)
+    
+def apply_boundary(S, u, v, dt, _eta, chi, v_solid):
+    eta = _eta*dt
+    du = u - v_solid[0]
+    dv = v - v_solid[1]
+    curl = to_spectral(physical_curl(du, dv) * chi / eta)
+    S[:] -= curl
 
 def apply_sgs(S, sgs, solver, i, sol, grid):
   if sgs:
@@ -62,7 +76,7 @@ def apply_sgs(S, sgs, solver, i, sol, grid):
 
 
 class PsuedoSpectralSolver(nn.Module):
-  def __init__(self, Nx, Ny, Lx, Ly, dt, t0, B, mu, nu, nv, eta, source, init, sgs=None, **kwargs):
+  def __init__(self, Nx, Ny, Lx, Ly, dt, t0, B, mu, nu, nv, eta, eta_penalty, source, init, mask, mask_velocity=None, sgs=None, **kwargs):
     """
     Notation: 
     - q, $\omega$ is potential vorticity
@@ -81,6 +95,7 @@ class PsuedoSpectralSolver(nn.Module):
     self.nu = nu
     self.nv = nv
     self.eta = eta.to(device)
+    self.eta_penalty = eta_penalty
     
     self.grid = TwoGrid(device, Nx=Nx, Ny=Ny, Lx=Lx, Ly=Ly)
 
@@ -97,6 +112,8 @@ class PsuedoSpectralSolver(nn.Module):
 
     self.pde = Pde(dt=dt, t0=t0, eq=self.eq, stepper=self.stepper)
     self.source = source
+    self.mask = mask
+    self.mask_velocity = mask_velocity
     
     self.kernel = self.grid.cutoff
       
@@ -128,7 +145,8 @@ class PsuedoSpectralSolver(nn.Module):
     uq, vq = compute_uvq(u, v, qe)
     update_spectral(S, uq, vq, grid)
     apply_source(S, self.source, i, sol, dt, t, grid)
-
+    apply_boundary(S, u, v, dt, self.eta_penalty, *self.solve_mask(i, sol, dt, t, grid))
+    
   def nonlinear_les(self, i, S, sol, dt, t, grid):
     qh, uh, vh = compute_uv(sol, grid)
     q, u, v, e = to_physical_vars_les(qh, uh, vh, self.eta, self.da)
@@ -143,6 +161,23 @@ class PsuedoSpectralSolver(nn.Module):
     Lc[0, 0] = 0
     return Lc
     
+  def solve_mask(self, i, sol, dt, t, grid):
+    if hasattr(self, 'chi'):
+      return self.chi, self.solid_vel
+    # shape xy,  2xy    
+    basic_mask = self.mask(i, sol, dt, t, grid).to(device) # smooth out and add 1/2 at edges
+    kernel = 1/16 * torch.tensor([[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=torch.float64).to(device)[None,None,...]
+    chi = F.conv2d(basic_mask[None,None,:,:], kernel, padding='same')[0,0]
+    
+    if self.mask_velocity:
+      solid_vel = self.mask_velocity(i, sol, dt, t, grid)
+      return chi, solid_vel 
+    else:
+      self.chi = chi
+      solid_vel = torch.zeros([2,], dtype=torch.float64).to(device)
+      self.solid_vel = solid_vel
+      return chi, solid_vel
+  
   # Flow with random gaussian energy only in the wavenumbers range
   def init_randn(self, energy, wavenumbers):
     K = torch.sqrt(self.grid.krsq) # Wavenumber of each point in frequency space
@@ -157,6 +192,13 @@ class PsuedoSpectralSolver(nn.Module):
     Ei = 0.5 * (self.grid.int_sq(self.grid.kr * self.grid.irsq * qih) + self.grid.int_sq(self.grid.ky * self.grid.irsq * qih)) / (self.grid.Lx * self.grid.Ly)
     qih *= torch.sqrt(E0 / Ei)
     self.pde.sol = qih
+    
+  def init_randn_persist(self, args={}):
+    if globals().get('IC_qih') is None:
+      self.init_randn(*args)
+      globals()['IC_qih'] = self.pde.sol.detach().clone()
+    else:
+      self.pde.sol = globals()['IC_qih'].detach().clone()
     
   def update(self):
     """

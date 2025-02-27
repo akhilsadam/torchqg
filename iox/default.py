@@ -42,7 +42,8 @@ params = {
   "nv": 1, # Hyperviscous order (nv=1 is viscosity)
   "eta": torch.zeros([512, 512], dtype=torch.float64, requires_grad=True), # Topographic potential vorticity
   "source": source, # Source term
-  "init": lambda f : f.init_randn(0.01, [3.0, 5.0])
+  "init": lambda f : f.init_randn(0.01, [3.0, 5.0]),
+  "mask": lambda *args: torch.zeros([512, 512], dtype=torch.float64, requires_grad=True),
 }
 
 
