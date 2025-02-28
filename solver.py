@@ -26,12 +26,19 @@ def physical_curl(u, v):
   du_dy = torch.gradient(u, dim = -2)[0]
   return dv_dx - du_dy
 
+# def compute_uv(sol, grid):
+#   qh = sol.clone()
+#   ph = -qh * grid.irsq
+#   uh = -1j * grid.ky * ph
+#   vh =  1j * grid.kr * ph
+#   return qh, ph, uh, vh
+
 def compute_uv(sol, grid):
   qh = sol.clone()
   ph = -qh * grid.irsq
   uh = -1j * grid.ky * ph
   vh =  1j * grid.kr * ph
-  return qh, uh, vh
+  return qh, ph, uh, vh
 
 def to_physical_vars(qh, uh, vh):
   q = to_physical(qh)
@@ -64,11 +71,12 @@ def apply_source(S, source, i, sol, dt, t, grid):
     S[:] += source(i, sol, dt, t, grid)
     
 def apply_boundary(S, u, v, dt, _eta, chi, v_solid):
-    eta = _eta*dt
-    du = u - v_solid[0]
-    dv = v - v_solid[1]
-    curl = to_spectral(physical_curl(du, dv) * chi / eta)
-    S[:] -= curl
+  if chi is not None:
+      eta = _eta*dt
+      du = u - v_solid[0]
+      dv = v - v_solid[1]
+      curl = to_spectral(physical_curl(du, dv) * chi / eta)
+      S[:] -= curl
 
 def apply_sgs(S, sgs, solver, i, sol, grid):
   if sgs:
@@ -120,6 +128,9 @@ class PsuedoSpectralSolver(nn.Module):
     self.sgs = sgs
     
     init(self) # Initialize IC.
+    
+    _mask, _ = self.solve_mask(0, self.pde.sol, dt, t0, self.grid)
+    self.pde.sol = to_spectral(to_physical(self.pde.sol) * (1-_mask))
 
   def __str__(self):
     return """Qg model
@@ -139,22 +150,25 @@ class PsuedoSpectralSolver(nn.Module):
       dt=self.pde.cur.dt)
 
   def nonlinear_dns(self, i, S, sol, dt, t, grid):
-    qh, uh, vh = compute_uv(sol, grid)
+    _mask, _mask_v = self.solve_mask(i, sol, dt, t, grid)
+    qh, ph, uh, vh = compute_uv(sol, grid)
     q, u, v = to_physical_vars(qh, uh, vh)
     qe = q + self.eta
-    uq, vq = compute_uvq(u, v, qe)
+    uq, vq = compute_uvq(u, v, qe)    
     update_spectral(S, uq, vq, grid)
     apply_source(S, self.source, i, sol, dt, t, grid)
-    apply_boundary(S, u, v, dt, self.eta_penalty, *self.solve_mask(i, sol, dt, t, grid))
+    apply_boundary(S, u, v, dt, self.eta_penalty, _mask,_mask_v)
     
   def nonlinear_les(self, i, S, sol, dt, t, grid):
-    qh, uh, vh = compute_uv(sol, grid)
+    _mask, _mask_v = self.solve_mask(i, sol, dt, t, grid)
+    qh, ph, uh, vh = compute_uv(sol, grid)
     q, u, v, e = to_physical_vars_les(qh, uh, vh, self.eta, self.da)
     qe = q + e
     uq, vq = compute_uvq(u, v, qe)
     update_spectral(S, uq, vq, grid, les=True)
     apply_sgs(S, self.sgs, self, i, sol, grid)
     apply_source(S, self.source, i, sol, dt, t, grid)
+    apply_boundary(S, u, v, dt, self.eta_penalty, _mask,_mask_v)
 
   def linear_term(self, grid):
     Lc = -self.mu - self.nu * grid.krsq**self.nv - 1j * self.B * grid.kr * grid.irsq
@@ -166,8 +180,12 @@ class PsuedoSpectralSolver(nn.Module):
       return self.chi, self.solid_vel
     # shape xy,  2xy    
     basic_mask = self.mask(i, sol, dt, t, grid).to(device) # smooth out and add 1/2 at edges
-    kernel = 1/16 * torch.tensor([[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=torch.float64).to(device)[None,None,...]
-    chi = F.conv2d(basic_mask[None,None,:,:], kernel, padding='same')[0,0]
+    if basic_mask is None:
+      chi = None
+      solid_vel = None
+    else:
+      kernel = 1/16 * torch.tensor([[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=torch.float64).to(device)[None,None,...]
+      chi = F.conv2d(basic_mask[None,None,:,:], kernel, padding='same')[0,0]
     
     if self.mask_velocity:
       solid_vel = self.mask_velocity(i, sol, dt, t, grid)
@@ -204,11 +222,7 @@ class PsuedoSpectralSolver(nn.Module):
     """
     Calculates streamfunction and velocities from vorticity
     """ 
-    qh = self.pde.sol.clone() # PDE solution only stores pot. vorticity
-    ph = -qh * self.grid.irsq
-    uh = -1j * self.grid.ky * ph
-    vh =  1j * self.grid.kr * ph
-
+    qh, ph, uh, vh = compute_uv(self.pde.sol, self.grid)
     # Potential vorticity
     q = to_physical(qh)
     # Streamfunction
@@ -220,7 +234,7 @@ class PsuedoSpectralSolver(nn.Module):
     return q, p, u, v
 
   def J(self, grid, qh):
-    qh, uh, vh = compute_uv(qh, grid)
+    qh, ph, uh, vh = compute_uv(qh, grid)
     q, u, v = to_physical_vars(qh, uh, vh)
     uq, vq = compute_uvq(u, v, q)
     uqh, vqh = to_spectral(uq), to_spectral(vq)

@@ -56,6 +56,7 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
   "B" : 0.0, # Planetary vorticity y-gradient
   "mu": 0.0,  # bottom friction term
   "nu": nu,
+  "eta_penalty": 1.0,
   "init": lambda f : f.init_randn_persist((0.01, [3.0, 5.0])) # 0-start
   })  
 
@@ -91,12 +92,16 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
     data = dns_dev[j].cpu().numpy()
     uvmax = max(np.abs(data[2]).max(), np.abs(data[3]).max())
+    wmax = np.abs(data[0]).max()
+    pmax = np.abs(data[1]).max()
     for i, ax in enumerate(axs.flat):
       di = data[i]
       if i > 1:
         ax.imshow(di, vmin=-uvmax, vmax=uvmax, cmap='seismic')
+      elif i==0:
+        ax.imshow(di, vmin=-wmax, vmax=wmax, cmap='seismic')
       else:
-        ax.imshow(di, cmap='seismic')
+        ax.imshow(di, vmin=-pmax, vmax=pmax, cmap='seismic')
       ax.set_title(['w', 'p', 'u', 'v'][i])
     plt.tight_layout()
     os.makedirs(path, exist_ok=True)
