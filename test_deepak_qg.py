@@ -113,12 +113,13 @@ if __name__ == '__main__':
   # [1, 64, 40, 1e-2, 1e-5],
   # [2, 128, 40, 1e-2, 1e-5],
   # [2, 256, 40, 1e-2, 1e-5],
-  [3, 512, 40, 1e-2, 1e-5], # no mask
+  # [3, 512, 40, 1e-2, 1e-5], # no mask
   # [4, 1024, 40, 1e-2, 1e-5], 
   # [5, 2048, 40, 1e-2, 1e-5],  
   ################# begin masking
-  [6, 512, 40, 1e-2, 1e-5], # square mask
-  [7, 512, 40, 1e-3, 1e-5], # square mask
+  # [6, 512, 40, 1e-2, 1e-5], # square mask
+  # [7, 512, 40, 1e-3, 1e-5], # square mask
+  [8, 512, 40, 1e-2, 1e-5], # square mask
   ]
   
   dts = [test_dqg(run) for run in runs]
