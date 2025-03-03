@@ -35,32 +35,6 @@ def compute_uv(sol, grid):
 
 def compute_uv_masked(sol, base_mask, mask, grid):
   qh = sol.clone()
-  
-  # add penalty term based on qh
-  # - lap p = qh becomes
-  # - lap p = qh - penalty
-  # - lap p = qh * maskh
-  
-  # A
-  # ph = -qh * grid.irsq
-  # p = to_physical(ph)
-  # pm = p * mask
-  # qmp = grid.krsq * to_spectral(pm)
-  # penalty = - qmp
-  
-  # _qh = - penalty
-  # ph = -_qh * grid.irsq
-
-  # B
-  # solve poisson equation s.t. lap p = 0 with bc p = _q_bc
-  # qh = to_spectral(to_physical(qh) * (1-mask))
-  # ph = -qh * grid.irsq
-
-  # for _ in range(30):
-  #   # convolve _bc with ph:
-  #   source = qh + to_spectral(to_physical(ph) * (mask))
-  #   ph = -source * grid.irsq
-  
   # C 
   # # fixed-point (addding A p_t+1 where A is -k^2)
   
@@ -70,23 +44,10 @@ def compute_uv_masked(sol, base_mask, mask, grid):
     # convolve _bc with ph:
     ph -= to_spectral(to_physical(ph) * (mask)) * grid.irsq     
    
-  # D
-  # fixed-point but opposite penalization? TODO fix
-  
-  # qh = to_spectral(to_physical(qh) * (1-mask))
-  # ph = -qh * grid.irsq
-  # for _ in range(5):
-  #   # convolve _bc with ph:
-  #   ph -= to_spectral(to_physical(ph) * (1-base_mask)) * grid.krsq     
   
   uh = -1j * grid.ky * ph
   vh =  1j * grid.kr * ph   
-  
-  # uh = to_spectral(to_physical(uh) * (1-mask))
-  # vh = to_spectral(to_physical(vh) * (1-mask))
-  # qh = (1j * grid.kr * vh) - (-1j * grid.ky * uh) # curl(u,v)
-  # ph = -qh * grid.irsq
-    
+
   return qh, ph, uh, vh
 
 def to_physical_vars(qh, uh, vh):
@@ -211,8 +172,6 @@ class PsuedoSpectralSolver(nn.Module):
     apply_source(S, self.source, i, sol, dt, t, grid)
     S += self.linear_term * sol
     
-    # S = to_spectral(to_physical(S) * (1-_mask)) # not needed
-    
     apply_boundary(S, u, v, dt, self.eta_penalty,_mask,_mask_v)
 
     return S
@@ -283,7 +242,6 @@ class PsuedoSpectralSolver(nn.Module):
     """
     Calculates streamfunction and velocities from vorticity
     """ 
-    base_mask, mask, mask_v = self.solve_mask(0, self.pde.sol, self.pde.cur.dt, self.pde.cur.t, self.grid)
     qh, ph, uh, vh = compute_uv(self.pde.sol, self.grid)
     ph = -qh * self.grid.irsq
     # Potential vorticity

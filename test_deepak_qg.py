@@ -56,7 +56,7 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
   "B" : 0.0, # Planetary vorticity y-gradient
   "mu": 0.0,  # bottom friction term
   "nu": nu,
-  "eta_penalty": 1.0,
+  "eta_penalty": 0.1,
   "init": lambda f : f.init_randn_persist((0.01, [3.0, 5.0])) # 0-start
   })  
 
@@ -66,12 +66,12 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
     x_mask = torch.linspace(-1, 1, params['Nx'])
     y_mask = torch.linspace(-1, 1, params['Ny'])
     mask = torch.stack(torch.meshgrid(x_mask, y_mask))
-    mask = (mask[0]**2 + mask[1]**2 < 0.3).to(torch.float64)
+    mask = (mask[0]**2 + (mask[1]-0.5)**2 < 0.07).to(torch.float64)
     mask = mask.to(device) 
   
   
   def source(i, sol, dt, t, grid):
-    fx = -(1/(2*torch.pi)) * torch.cos(grid.y).view(grid.Ny, 1) + (0*grid.x).view(1, grid.Nx)
+    fx = -(50/(2*torch.pi)) * torch.cos(grid.y).view(grid.Ny, 1) + (0*grid.x).view(1, grid.Nx)
     fy = (0*grid.y).view(grid.Ny, 1) + (0 * grid.x).view(1, grid.Nx)
     yh = to_spectral(physical_curl(fx,fy) * (1-mask))
     return yh 
@@ -97,14 +97,15 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
     fig, axs = plt.subplots(2, 2, figsize=(10, 10))
     data = dns_dev[j].cpu().numpy()
     uvmax = max(np.abs(data[2]).max(), np.abs(data[3]).max())
-    wmax = np.abs(data[0]).max()
+    # wmax = np.abs(data[0]).max()
     pmax = np.abs(data[1]).max()
     for i, ax in enumerate(axs.flat):
       di = data[i]
       if i > 1:
         ax.imshow(di, vmin=-uvmax, vmax=uvmax, cmap='seismic')
       elif i==0:
-        ax.imshow(di, vmin=-wmax, vmax=wmax, cmap='seismic')
+        wmax = np.abs(di).max()
+        ax.imshow(di, vmin=-wmax, vmax=wmax, cmap='seismic') # ,
       else:
         ax.imshow(di, vmin=-pmax, vmax=pmax, cmap='seismic')
         # quiver plot
@@ -113,7 +114,7 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
         _Nx = params['Nx']
         _Ny = params['Ny']
         res=64
-        ax.quiver(np.arange(0, _Nx, _Nx//res), np.arange(0, _Ny, _Ny//res), dx[::_Nx//res, ::_Ny//res], dy[::_Nx//res, ::_Ny//res], scale=4)
+        ax.quiver(np.arange(0, _Nx, _Nx//res), np.arange(0, _Ny, _Ny//res), dx[::_Nx//res, ::_Ny//res], dy[::_Nx//res, ::_Ny//res], scale=32)
       ax.set_title(['w', 'streamfunction', 'u', 'v'][i])
     plt.tight_layout()
     os.makedirs(path, exist_ok=True)
@@ -137,7 +138,8 @@ if __name__ == '__main__':
   # [6, 512, 40, 1e-2, 1e-5], # square mask
   # [7, 512, 40, 1e-3, 1e-5], # square mask
   # [8, 512, 40, 1e-2, 1e-5], # square mask
-  [9, 512, 40, 1e-2, 1e-5], # square mask w extra pressure penalty
+  [9, 512, 40, 1e-3, 1e-2], # round mask
+  [10, 512, 40, 1e-3, 1e-5], # round mask
   
   ]
   
