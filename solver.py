@@ -26,18 +26,67 @@ def physical_curl(u, v):
   du_dy = torch.gradient(u, dim = -2)[0]
   return dv_dx - du_dy
 
-# def compute_uv(sol, grid):
-#   qh = sol.clone()
-#   ph = -qh * grid.irsq
-#   uh = -1j * grid.ky * ph
-#   vh =  1j * grid.kr * ph
-#   return qh, ph, uh, vh
-
 def compute_uv(sol, grid):
   qh = sol.clone()
   ph = -qh * grid.irsq
   uh = -1j * grid.ky * ph
   vh =  1j * grid.kr * ph
+  return qh, ph, uh, vh
+
+def compute_uv_masked(sol, base_mask, mask, grid):
+  qh = sol.clone()
+  
+  # add penalty term based on qh
+  # - lap p = qh becomes
+  # - lap p = qh - penalty
+  # - lap p = qh * maskh
+  
+  # A
+  # ph = -qh * grid.irsq
+  # p = to_physical(ph)
+  # pm = p * mask
+  # qmp = grid.krsq * to_spectral(pm)
+  # penalty = - qmp
+  
+  # _qh = - penalty
+  # ph = -_qh * grid.irsq
+
+  # B
+  # solve poisson equation s.t. lap p = 0 with bc p = _q_bc
+  # qh = to_spectral(to_physical(qh) * (1-mask))
+  # ph = -qh * grid.irsq
+
+  # for _ in range(30):
+  #   # convolve _bc with ph:
+  #   source = qh + to_spectral(to_physical(ph) * (mask))
+  #   ph = -source * grid.irsq
+  
+  # C 
+  # # fixed-point (addding A p_t+1 where A is -k^2)
+  
+  qh = to_spectral(to_physical(qh) * (1-base_mask))
+  ph = -qh * grid.irsq
+  for _ in range(5):
+    # convolve _bc with ph:
+    ph -= to_spectral(to_physical(ph) * (mask)) * grid.irsq     
+   
+  # D
+  # fixed-point but opposite penalization? TODO fix
+  
+  # qh = to_spectral(to_physical(qh) * (1-mask))
+  # ph = -qh * grid.irsq
+  # for _ in range(5):
+  #   # convolve _bc with ph:
+  #   ph -= to_spectral(to_physical(ph) * (1-base_mask)) * grid.krsq     
+  
+  uh = -1j * grid.ky * ph
+  vh =  1j * grid.kr * ph   
+  
+  # uh = to_spectral(to_physical(uh) * (1-mask))
+  # vh = to_spectral(to_physical(vh) * (1-mask))
+  # qh = (1j * grid.kr * vh) - (-1j * grid.ky * uh) # curl(u,v)
+  # ph = -qh * grid.irsq
+    
   return qh, ph, uh, vh
 
 def to_physical_vars(qh, uh, vh):
@@ -73,9 +122,9 @@ def apply_source(S, source, i, sol, dt, t, grid):
 def apply_boundary(S, u, v, dt, _eta, chi, v_solid):
   if chi is not None:
       eta = _eta*dt
-      du = u - v_solid[0]
-      dv = v - v_solid[1]
-      curl = to_spectral(physical_curl(du, dv) * chi / eta)
+      du = (u - v_solid[0]) * chi
+      dv = (v - v_solid[1]) * chi
+      curl = to_spectral(physical_curl(du, dv) / eta)
       S[:] -= curl
 
 def apply_sgs(S, sgs, solver, i, sol, grid):
@@ -106,14 +155,15 @@ class PsuedoSpectralSolver(nn.Module):
     self.eta_penalty = eta_penalty
     
     self.grid = TwoGrid(device, Nx=Nx, Ny=Ny, Lx=Lx, Ly=Ly)
+    self.linear_term = self._linear_term(self.grid)
 
     if sgs:
       # use 3/2 rule
-      self.eq = Eq(grid=self.grid, linear_term=self.linear_term(self.grid), nonlinear_term=self.nonlinear_les)
+      self.eq = Eq(grid=self.grid, linear_term=self.linear_term, nonlinear_term=self.dns)
       self.da = TwoGrid(device, Nx=int((3./2.)*Nx), Ny=int((3./2.)*Ny), Lx=Lx, Ly=Ly, dealias=1/3)
     else:
       # use 2/3 rule
-      self.eq = Eq(grid=self.grid, linear_term=self.linear_term(self.grid), nonlinear_term=self.nonlinear_dns)
+      self.eq = Eq(grid=self.grid, linear_term=self.linear_term, nonlinear_term=self.dns)
       
       
     self.stepper = RungeKutta4(eq=self.eq)
@@ -149,35 +199,45 @@ class PsuedoSpectralSolver(nn.Module):
       beta=self.B,
       dt=self.pde.cur.dt)
 
-  def nonlinear_dns(self, i, S, sol, dt, t, grid):
-    _mask, _mask_v = self.solve_mask(i, sol, dt, t, grid)
-    qh, ph, uh, vh = compute_uv(sol, grid)
+  def dns(self, i, S, sol, dt, t, grid):
+    base_mask, _mask, _mask_v = self.solve_mask(i, sol, dt, t, grid)
+    qh, _, uh, vh = compute_uv(sol, grid)
     q, u, v = to_physical_vars(qh, uh, vh)
+    
     qe = q + self.eta
-    uq, vq = compute_uvq(u, v, qe)    
+    uq, vq = compute_uvq(u, v, qe) 
+       
     update_spectral(S, uq, vq, grid)
     apply_source(S, self.source, i, sol, dt, t, grid)
-    apply_boundary(S, u, v, dt, self.eta_penalty, _mask,_mask_v)
+    S += self.linear_term * sol
     
-  def nonlinear_les(self, i, S, sol, dt, t, grid):
+    # S = to_spectral(to_physical(S) * (1-_mask)) # not needed
+    
+    apply_boundary(S, u, v, dt, self.eta_penalty,_mask,_mask_v)
+
+    return S
+    
+  def les(self, i, S, sol, dt, t, grid):
     _mask, _mask_v = self.solve_mask(i, sol, dt, t, grid)
-    qh, ph, uh, vh = compute_uv(sol, grid)
+    qh, _, uh, vh = compute_uv(sol, grid)
     q, u, v, e = to_physical_vars_les(qh, uh, vh, self.eta, self.da)
     qe = q + e
     uq, vq = compute_uvq(u, v, qe)
     update_spectral(S, uq, vq, grid, les=True)
     apply_sgs(S, self.sgs, self, i, sol, grid)
     apply_source(S, self.source, i, sol, dt, t, grid)
+    S += self.linear_term * sol
     apply_boundary(S, u, v, dt, self.eta_penalty, _mask,_mask_v)
+    return S
 
-  def linear_term(self, grid):
+  def _linear_term(self, grid):
     Lc = -self.mu - self.nu * grid.krsq**self.nv - 1j * self.B * grid.kr * grid.irsq
     Lc[0, 0] = 0
     return Lc
-    
+
   def solve_mask(self, i, sol, dt, t, grid):
     if hasattr(self, 'chi'):
-      return self.chi, self.solid_vel
+      return self.base_chi, self.chi, self.solid_vel
     # shape xy,  2xy    
     basic_mask = self.mask(i, sol, dt, t, grid).to(device) # smooth out and add 1/2 at edges
     if basic_mask is None:
@@ -191,6 +251,7 @@ class PsuedoSpectralSolver(nn.Module):
       solid_vel = self.mask_velocity(i, sol, dt, t, grid)
       return chi, solid_vel 
     else:
+      self.base_chi = basic_mask
       self.chi = chi
       solid_vel = torch.zeros([2,], dtype=torch.float64).to(device)
       self.solid_vel = solid_vel
@@ -222,7 +283,9 @@ class PsuedoSpectralSolver(nn.Module):
     """
     Calculates streamfunction and velocities from vorticity
     """ 
+    base_mask, mask, mask_v = self.solve_mask(0, self.pde.sol, self.pde.cur.dt, self.pde.cur.t, self.grid)
     qh, ph, uh, vh = compute_uv(self.pde.sol, self.grid)
+    ph = -qh * self.grid.irsq
     # Potential vorticity
     q = to_physical(qh)
     # Streamfunction

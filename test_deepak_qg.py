@@ -62,7 +62,12 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
 
   mask = torch.zeros([params['Nx'],params['Ny']], dtype=torch.float64, requires_grad=False).to(device)
   if i > 5:
-    mask[params['Nx']//4:3*params['Nx']//4, params['Ny']//4:3*params['Ny']//4] = 1  
+    # mask[params['Nx']//4:3*params['Nx']//4, params['Ny']//4:3*params['Ny']//4] = 1 
+    x_mask = torch.linspace(-1, 1, params['Nx'])
+    y_mask = torch.linspace(-1, 1, params['Ny'])
+    mask = torch.stack(torch.meshgrid(x_mask, y_mask))
+    mask = (mask[0]**2 + mask[1]**2 < 0.3).to(torch.float64)
+    mask = mask.to(device) 
   
   
   def source(i, sol, dt, t, grid):
@@ -102,7 +107,14 @@ def test_dqg(vars, save=False, path='out/deepak-qg/'):
         ax.imshow(di, vmin=-wmax, vmax=wmax, cmap='seismic')
       else:
         ax.imshow(di, vmin=-pmax, vmax=pmax, cmap='seismic')
-      ax.set_title(['w', 'p', 'u', 'v'][i])
+        # quiver plot
+        dy = data[-1]
+        dx = data[-2]
+        _Nx = params['Nx']
+        _Ny = params['Ny']
+        res=64
+        ax.quiver(np.arange(0, _Nx, _Nx//res), np.arange(0, _Ny, _Ny//res), dx[::_Nx//res, ::_Ny//res], dy[::_Nx//res, ::_Ny//res], scale=4)
+      ax.set_title(['w', 'streamfunction', 'u', 'v'][i])
     plt.tight_layout()
     os.makedirs(path, exist_ok=True)
     plt.savefig(path+f'bench_qg_{j}.png')
@@ -124,7 +136,9 @@ if __name__ == '__main__':
   ################# begin masking
   # [6, 512, 40, 1e-2, 1e-5], # square mask
   # [7, 512, 40, 1e-3, 1e-5], # square mask
-  [8, 512, 40, 1e-2, 1e-5], # square mask
+  # [8, 512, 40, 1e-2, 1e-5], # square mask
+  [9, 512, 40, 1e-2, 1e-5], # square mask w extra pressure penalty
+  
   ]
   
   dts = [test_dqg(run) for run in runs]

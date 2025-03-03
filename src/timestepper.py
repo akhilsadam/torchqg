@@ -13,9 +13,9 @@ class ForwardEuler:
     dt = cur.dt
     t  = cur.t
 
-    eq.nonlinear_term(0, self.S, sol, dt, t, grid)
-    self.S += eq.linear_term*sol.clone()
+    self.S = eq.nonlinear_term(0, self.S, sol, dt, t, grid)
     sol += dt*self.S
+    
     cur.step()
 
 class RungeKutta2:
@@ -35,13 +35,11 @@ class RungeKutta2:
     t  = cur.t
 
     # substep 1
-    eq.nonlinear_term(0, self.rhs1, sol, dt, t, grid)
-    self.rhs1 += eq.linear_term*sol
+    self.rhs1 = eq.nonlinear_term(0, self.rhs1, sol, dt, t, grid)
 
     # substep 2
     self.S = sol + self.rhs1 * dt*0.5
-    eq.nonlinear_term(1, self.rhs2, self.S, dt*0.5, t + dt*0.5, grid)
-    self.rhs2 += eq.linear_term*self.S
+    self.rhs2 = eq.nonlinear_term(1, self.rhs2, self.S, dt*0.5, t + dt*0.5, grid)
 
     sol += dt*self.rhs2
     cur.step()
@@ -67,23 +65,19 @@ class RungeKutta4:
     t  = cur.t
 
     # substep 1
-    eq.nonlinear_term(0, self.rhs1, sol, dt, t, grid)
-    self.rhs1 += eq.linear_term*sol
+    self.rhs1= eq.nonlinear_term(0, self.rhs1, sol, dt, t, grid)
 
     # substep 2
     self.S = sol + self.rhs1 * dt*0.5
-    eq.nonlinear_term(1, self.rhs2, self.S, dt*0.5, t + dt*0.5, grid)
-    self.rhs2 += eq.linear_term*self.S
+    self.rhs2 = eq.nonlinear_term(1, self.rhs2, self.S, dt*0.5, t + dt*0.5, grid)
 
     # substep 3
     self.S = sol + self.rhs2 * dt*0.5
-    eq.nonlinear_term(2, self.rhs3, self.S, dt*0.5, t + dt*0.5, grid)
-    self.rhs3 += eq.linear_term*self.S
+    self.rhs3 = eq.nonlinear_term(2, self.rhs3, self.S, dt*0.5, t + dt*0.5, grid)
 
     # substep 4
     self.S = sol + self.rhs3 * dt
-    eq.nonlinear_term(3, self.rhs4, self.S, dt, t + dt, grid)
-    self.rhs4 += eq.linear_term*self.S
+    self.rhs4 = eq.nonlinear_term(3, self.rhs4, self.S, dt, t + dt, grid)
 
     sol += dt*(self.rhs1/6.0 + self.rhs2/3.0 + self.rhs3/3.0 + self.rhs4/6.0)
     cur.step()
